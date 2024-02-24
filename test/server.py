@@ -11,6 +11,9 @@ tokens = ["x", "o"]
 current_player = tokens[0]
 winner = None
 
+# <uid>: (<token>, <client_address>)
+players = {}
+
 
 @app.route("/", methods=['GET'])
 def index():
@@ -22,6 +25,77 @@ def index():
 def status():
     global current_player
     return jsonify(player=current_player, board=board.tolist())
+
+
+@app.route("/join", methods=['POST'])
+def join():
+    global players
+
+    if not request.is_json:
+        return jsonify({"error": "Data must be sent as JSON"}), 400
+    request_data = request.json
+
+    uid = request_data.get("uid")
+    cip = request.remote_addr
+
+    if uid is None or cip is None:
+        return jsonify({"error": "There is not enough data. The request must contain uid and ip"}), 400
+
+    print("Client with ip {} and uid {} connected!".format(cip, uid))
+
+    if len(players) == 0:
+        players[uid] = ('x', cip)
+    elif len(players) == 1:
+        players[uid] = ('o', cip)
+    else:
+        return jsonify({"error": "The maximum number of players has already been joined"}), 400
+
+    return jsonify(player=current_player, token=players[uid][0], board=board.tolist()), 200
+
+
+@app.route("/move", methods=["GET", "POST"])
+def move():
+    global current_player
+    global winner
+    global players
+
+    # Проверка - определен ли уже победитель
+    if request.method == "GET":
+        if winner:
+            return jsonify(player=current_player, board=board.tolist(), winner=winner, draw=False)
+        return jsonify(player=current_player, board=board.tolist(), winner=None, draw=False)
+
+    if not request.is_json:
+        return jsonify({"error": "Data must be sent as JSON"}), 400
+
+    request_data = request.json
+    # get() returns uid or None
+    uid = request_data.get("uid")
+    row = request_data.get("row")
+    col = request_data.get("col")
+
+    if uid is None:
+        return jsonify({"error": "Invalid request, please specify uid"}), 400
+    if uid not in players:
+        return jsonify({"error": "Cannot make move. Not on the list of players"}), 400
+
+    # Validation
+    if row is None or col is None:
+        return jsonify({"error": "Invalid move, please specify row and column"}), 400
+    if row < 0 or row > 2 or col < 0 or col > 2:
+        return jsonify({"error": "Invalid move, row and column must be between 0 and 2"}), 400
+    if board[row][col] != " ":
+        return jsonify({"error": "Invalid move, cell already occupied"}), 400
+
+    board[row][col] = current_player
+
+    if check_winner():
+        init_game()
+        return jsonify(board=board.tolist(), winner=winner, draw=(winner is None))
+
+    # 0 ^ 1 == 1, 1 ^ 1 == 0
+    current_player = tokens[tokens.index(current_player) ^ 1]
+    return jsonify(board=board.tolist(), winner=None, draw=False)
 
 
 def check_winner():
@@ -42,6 +116,18 @@ def check_winner():
         winner = None
         return True
     return False
+
+
+def init_game():
+    global players
+    global board
+    global winner
+    global current_player
+
+    board[:, :] = " "
+    current_player = tokens[0]
+    winner = None
+    players.clear()
 
 
 if __name__ == '__main__':
