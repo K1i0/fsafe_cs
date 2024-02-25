@@ -10,6 +10,7 @@ board = np.full((3, 3), " ")
 tokens = ["x", "o"]
 current_player = tokens[0]
 winner = None
+is_game_start = False
 
 # <uid>: (<token>, <client_address>)
 players = {}
@@ -23,13 +24,13 @@ def index():
 # Возвращает текущий статус игры (текущий токен и состояние доски)
 @app.route("/status", methods=['GET'])
 def status():
-    global current_player
-    return jsonify(player=current_player, board=board.tolist())
+    return jsonify(player=current_player, is_game_start=is_game_start, board=board.tolist())
 
 
 @app.route("/join", methods=['POST'])
 def join():
     global players
+    global is_game_start
 
     if not request.is_json:
         return jsonify({"error": "Data must be sent as JSON"}), 400
@@ -44,13 +45,14 @@ def join():
     print("Client with ip {} and uid {} connected!".format(cip, uid))
 
     if len(players) == 0:
-        players[uid] = ('x', cip)
+        players[uid] = 'x'
     elif len(players) == 1:
-        players[uid] = ('o', cip)
+        players[uid] = 'o'
+        is_game_start = True
     else:
         return jsonify({"error": "The maximum number of players has already been joined"}), 400
 
-    return jsonify(player=current_player, token=players[uid][0], board=board.tolist()), 200
+    return jsonify(player=current_player, token=players[uid], board=board.tolist()), 200
 
 
 @app.route("/move", methods=["GET", "POST"])
@@ -123,11 +125,13 @@ def init_game():
     global board
     global winner
     global current_player
+    global is_game_start
 
     board[:, :] = " "
     current_player = tokens[0]
     winner = None
     players.clear()
+    is_game_start = False
 
 
 if __name__ == '__main__':
