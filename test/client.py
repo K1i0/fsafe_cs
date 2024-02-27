@@ -1,8 +1,9 @@
 import uuid
-import requests
-
 import time
 import sys
+
+
+import make_request as mq
 
 SERVER_URL = 'http://127.0.0.1:8080/'
 user_id = str(uuid.uuid4())
@@ -16,40 +17,8 @@ def print_board(board):
     print('')
 
 
-def process_response(response):
-    if response.status_code == 400:
-        print(response.json()["error"])
-        return False
-    else:
-        return True
-
-
-def make_request(method, url, data=None):
-    try:
-        if method == 'GET':
-            response = requests.get(url)
-        elif method == 'POST':
-            response = requests.post(url, json=data)
-        else:
-            return "Неподдерживаемый метод запроса. Поддерживаемые методы: GET, POST."
-
-        return process_response(response), response
-    except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP ошибка при выполнении запроса: {http_err}")
-        sys.exit()
-    except requests.exceptions.ConnectionError as conn_err:
-        print(f"Ошибка подключения при выполнении запроса: {conn_err}")
-        sys.exit()
-    except requests.exceptions.Timeout as timeout_err:
-        print(f"Ошибка тайм-аута при выполнении запроса: {timeout_err}")
-        sys.exit()
-    except requests.exceptions.RequestException as req_err:
-        print(f"Общая ошибка при выполнении запроса: {req_err}")
-        sys.exit()
-
-
 def connect():
-    status, response = make_request('POST', SERVER_URL + "join", data={"uid": user_id})
+    status, response = mq.make_request('POST', SERVER_URL + "join", data={"uid": user_id})
 
     if status:
         data = response.json()
@@ -68,7 +37,7 @@ def make_move():
     while True:
         row, col = map(int, input("Enter row and col (0, 1, or 2): ").split())
         move = {"uid": user_id, "row": row, "col": col}
-        status, response = make_request('POST', SERVER_URL + "move", data=move)
+        status, response = mq.make_request('POST', SERVER_URL + "move", data=move)
 
         if status:
             return response
@@ -85,7 +54,7 @@ def animated_loading(phrase):
 def wait_server(stage, token=None):
     if stage == 'start':
         while True:
-            status, response = make_request('GET', SERVER_URL + "status")
+            status, response = mq.make_request('GET', SERVER_URL + "status")
             if status:
                 if response.json()["is_game_start"]:
                     print()
@@ -94,7 +63,7 @@ def wait_server(stage, token=None):
             time.sleep(.5)
     elif stage == 'player':
         while True:
-            status, response = make_request('GET', SERVER_URL + "move")
+            status, response = mq.make_request('GET', SERVER_URL + "move")
             data = response.json()
             board = data["board"]
             player = response.json()["player"]
@@ -143,7 +112,7 @@ def main():
                 print("It's a draw!")
                 break
 
-            status, response = make_request('GET', SERVER_URL + "move")
+            status, response = mq.make_request('GET', SERVER_URL + "move")
             player = response.json()["player"]
         else:
             player, board = wait_server('player', token)

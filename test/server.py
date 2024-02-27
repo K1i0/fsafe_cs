@@ -1,19 +1,68 @@
 import argparse
 import json
-
+import time
+import threading
 import numpy as np
 from flask import Flask, jsonify, request
 
+import make_request as mq
+
 app = Flask(__name__)
 
+# Переменные для реализации игровой логики
 board = np.full((3, 3), " ")
 tokens = ["x", "o"]
 current_player = tokens[0]
 winner = None
 is_game_start = False
+is_draw = False
 
 # <uid>: (<token>, <client_address>)
 players = {}
+
+# Реализация отказоустойчивости
+# url: is_available
+reserve_servers = {}
+
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    return 'OK'
+
+
+def ping_server(url):
+    stat, response = mq.make_request('GET', 'http://' + url + '/ping')
+    if stat:
+        print(f"Ответ от {url + '/ping'}: {response.text}")
+        return True
+    return False
+
+
+def init_interconnect(servers):
+    global reserve_servers
+    while True:
+        for server in servers:
+            ping_server(server)
+        time.sleep(5)
+        # for i in range(10):
+        # if ping_server(server):
+        #     reserve_servers[server] = True
+        #     time.sleep(1)
+        #     break
+        # else:
+        #     reserve_servers[server] = False
+    print(reserve_servers)
+
+
+@app.route("/sync", methods=['POST'])
+def sync_data():
+    data = request.json()
+    print(data)
+
+
+def broadcast_game_progress():
+    for url, is_available in reserve_servers:
+        stat, response = mq.make_request('POST', url + '/sync', jsonify(board=board, winner=winner))
 
 
 @app.route("/", methods=['GET'])
@@ -37,12 +86,11 @@ def join():
     request_data = request.json
 
     uid = request_data.get("uid")
-    cip = request.remote_addr
 
-    if uid is None or cip is None:
-        return jsonify({"error": "There is not enough data. The request must contain uid and ip"}), 400
+    if uid is None:
+        return jsonify({"error": "There is not enough data. The request must contain uid"}), 400
 
-    print("Client with ip {} and uid {} connected!".format(cip, uid))
+    print("Client with uid {} connected!".format(uid))
 
     if len(players) == 0:
         players[uid] = 'x'
@@ -63,8 +111,10 @@ def move():
 
     # Проверка - определен ли уже победитель
     if request.method == "GET":
-        if winner:
-            return jsonify(player=current_player, board=board.tolist(), winner=winner, draw=False)
+        if check_winner():
+            game_result = jsonify(player=current_player, board=board.tolist(), winner=winner, draw=is_draw)
+            init_game()
+            return game_result
         return jsonify(player=current_player, board=board.tolist(), winner=None, draw=False)
 
     if not request.is_json:
@@ -92,7 +142,7 @@ def move():
     board[row][col] = current_player
 
     if check_winner():
-        init_game()
+        # init_game()
         return jsonify(board=board.tolist(), winner=winner, draw=(winner is None))
 
     # 0 ^ 1 == 1, 1 ^ 1 == 0
@@ -102,6 +152,7 @@ def move():
 
 def check_winner():
     global winner
+    global is_draw
     for token in tokens:
         # Check rows and columns
         for i in range(3):
@@ -116,6 +167,7 @@ def check_winner():
     # Check for draw
     if " " not in board:
         winner = None
+        is_draw = True
         return True
     return False
 
@@ -134,7 +186,8 @@ def init_game():
     is_game_start = False
 
 
-if __name__ == '__main__':
+def main():
+    global reserve_servers
     # Создаем парсер аргументов
     parser = argparse.ArgumentParser(description="Command line arguments parser")
     # Добавляем аргументы
@@ -146,6 +199,14 @@ if __name__ == '__main__':
         data = json.load(config_file)
         host = data["host"]
         port = data["port"]
-        reserve = data["reserve"]
+        servers = data["reserve"]
+
+    ping_thread = threading.Thread(target=init_interconnect, args=(servers, ))
+    ping_thread.start()
 
     app.run(host=host, port=port, debug=True)
+    # init_interconnect(servers)
+
+
+if __name__ == '__main__':
+    main()
