@@ -23,6 +23,8 @@ players = {}
 # Реализация отказоустойчивости
 # url: is_available
 reserve_servers = {}
+is_init_finished = False
+reconnect_count = 3
 
 
 @app.route('/ping', methods=['GET'])
@@ -30,39 +32,67 @@ def ping():
     return 'OK'
 
 
-def ping_server(url):
-    stat, response = mq.make_request('GET', 'http://' + url + '/ping')
-    if stat:
-        print(f"Ответ от {url + '/ping'}: {response.text}")
-        return True
-    return False
-
-
-def init_interconnect(servers):
+def init_interconnect(urls):
     global reserve_servers
-    while True:
-        for server in servers:
-            ping_server(server)
-        time.sleep(5)
-        # for i in range(10):
-        # if ping_server(server):
-        #     reserve_servers[server] = True
-        #     time.sleep(1)
-        #     break
-        # else:
-        #     reserve_servers[server] = False
+    global is_init_finished
+    for server in urls:
+        for _ in range(reconnect_count):
+            if mq.ping(server):
+                reserve_servers[server] = True
+                break
+            else:
+                reserve_servers[server] = False
+            time.sleep(1)
     print(reserve_servers)
+    is_init_finished = True
+    return
 
 
 @app.route("/sync", methods=['POST'])
-def sync_data():
-    data = request.json()
-    print(data)
+def sync():
+    global board
+    global current_player
+    global winner
+    global is_game_start
+    global is_draw
+    global players
+
+    if not request.is_json:
+        return jsonify({"error": "Data must be sent as JSON"}), 400
+
+    request_data = request.json
+    # get() returns uid or None
+    board = request_data.get("board")
+    board = np.array(board)
+    current_player = request_data.get("current_player")
+    winner = request_data.get("winner")
+    is_game_start = request_data.get("is_game_start")
+    is_draw = request_data.get("is_draw")
+    players = request_data.get("players")
+
+    print('board: ', board)
+    print('current_player', current_player)
+    print('winner', winner)
+    print('is_game_start', is_game_start)
+    print('is_draw', is_draw)
+    print('players', players)
+
+    return 'OK', 200
 
 
 def broadcast_game_progress():
-    for url, is_available in reserve_servers:
-        stat, response = mq.make_request('POST', url + '/sync', jsonify(board=board, winner=winner))
+    game_status = {
+        "board": board.tolist(),
+        "current_player": current_player,
+        "winner": winner,
+        "is_game_start": is_game_start,
+        "is_draw": is_draw,
+        "players": players
+    }
+
+    for url, is_available in reserve_servers.items():
+        if is_available:
+            mq.make_request('POST', 'http://' + url + '/sync', game_status)
 
 
 @app.route("/", methods=['GET'])
@@ -73,6 +103,7 @@ def index():
 # Возвращает текущий статус игры (текущий токен и состояние доски)
 @app.route("/status", methods=['GET'])
 def status():
+    broadcast_game_progress()
     return jsonify(player=current_player, is_game_start=is_game_start, board=board.tolist())
 
 
@@ -100,6 +131,7 @@ def join():
     else:
         return jsonify({"error": "The maximum number of players has already been joined"}), 400
 
+    broadcast_game_progress()
     return jsonify(player=current_player, token=players[uid], board=board.tolist()), 200
 
 
@@ -114,7 +146,9 @@ def move():
         if check_winner():
             game_result = jsonify(player=current_player, board=board.tolist(), winner=winner, draw=is_draw)
             init_game()
+            broadcast_game_progress()
             return game_result
+        broadcast_game_progress()
         return jsonify(player=current_player, board=board.tolist(), winner=None, draw=False)
 
     if not request.is_json:
@@ -147,6 +181,8 @@ def move():
 
     # 0 ^ 1 == 1, 1 ^ 1 == 0
     current_player = tokens[tokens.index(current_player) ^ 1]
+
+    broadcast_game_progress()
     return jsonify(board=board.tolist(), winner=None, draw=False)
 
 
@@ -199,9 +235,11 @@ def main():
         data = json.load(config_file)
         host = data["host"]
         port = data["port"]
-        servers = data["reserve"]
+        servers_url = data["reserve"]
 
-    ping_thread = threading.Thread(target=init_interconnect, args=(servers, ))
+    # init_interconnect(servers_url)
+
+    ping_thread = threading.Thread(target=init_interconnect, args=(servers_url,))
     ping_thread.start()
 
     app.run(host=host, port=port, debug=True)

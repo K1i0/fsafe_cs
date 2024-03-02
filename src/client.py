@@ -1,12 +1,49 @@
 import uuid
 import time
 import sys
-
+import argparse
+import json
+import threading
 
 import make_request as mq
 
-SERVER_URL = 'http://127.0.0.1:8080/'
+SERVER_IP = '127.0.0.1:8080'
+SERVER_URL = 'http://' + SERVER_IP + '/'
 user_id = str(uuid.uuid4())
+
+servers_ip = []
+servers_stat = {}
+
+
+def update_servers_status():
+    global servers_stat
+
+    # Обновление статусов (up / down) серверов
+    while True:
+        for server in servers_ip:
+            if mq.ping(server):
+                servers_stat[server] = True
+            else:
+                servers_stat[server] = False
+        time.sleep(10)
+
+
+def change_server():
+    global SERVER_IP
+    global SERVER_URL
+
+    # Если сервак нужно сменить, значит он еще оффлайн
+    servers_stat[SERVER_IP] = False
+
+    for ip_address in servers_ip:
+        if servers_stat[ip_address]:
+            SERVER_IP = ip_address
+            SERVER_URL = 'http://' + SERVER_IP + '/'
+            return True
+
+    # Неn серверов для замены
+    print(f"Невозможно подключиться к серверам игры: {servers_stat}")
+    return False
 
 
 def print_board(board):
@@ -25,7 +62,14 @@ def connect():
         player = data["player"]
         board = data["board"]
         token = data["token"]
+    elif response == 503:
+        print(response)
+        if change_server():
+            return connect()
+        else:
+            return None, None, None
     else:
+        print(response)
         return None, None, None
 
     return player, board, token
@@ -41,6 +85,12 @@ def make_move():
 
         if status:
             return response
+        elif response == 503:
+            if not change_server():
+                sys.exit()
+            status, response = mq.make_request('POST', SERVER_URL + "move", data=move)
+            if status:
+                return response
 
 
 def animated_loading(phrase):
@@ -64,6 +114,12 @@ def wait_server(stage, token=None):
     elif stage == 'player':
         while True:
             status, response = mq.make_request('GET', SERVER_URL + "move")
+
+            if not status and response == 503:
+                if not change_server():
+                    sys.exit()
+                status, response = mq.make_request('GET', SERVER_URL + "move")
+
             data = response.json()
             board = data["board"]
             player = response.json()["player"]
@@ -91,6 +147,20 @@ k = 0
 
 def main():
     print("Welcome to Tic Tac Toe!")
+
+    global servers_ip
+
+    parser = argparse.ArgumentParser(description="Command line arguments parser")
+    parser.add_argument('--config', type=str, default='config/cc.json',
+                        help='Client config file (contains server\'s ip)')
+    args = parser.parse_args()
+    with open(args.config, 'r') as config_file:
+        data = json.load(config_file)
+        servers_ip = data["servers"]
+        print(servers_ip)
+
+    ping_thread = threading.Thread(target=update_servers_status)
+    ping_thread.start()
 
     player, board, token = connect()
     if any(var is None for var in (player, board, token)):
