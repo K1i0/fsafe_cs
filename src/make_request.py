@@ -23,7 +23,6 @@ def make_request(method, url, data=None, timeout=5):
         if method == 'GET':
             response = requests.get(url)
         elif method == 'POST':
-            print(data)
             response = requests.post(url, json=data)
         else:
             return "Неподдерживаемый метод запроса. Поддерживаемые методы: GET, POST."

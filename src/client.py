@@ -25,7 +25,7 @@ def update_servers_status():
                 servers_stat[server] = True
             else:
                 servers_stat[server] = False
-        time.sleep(10)
+        time.sleep(5)
 
 
 def change_server():
@@ -63,13 +63,11 @@ def connect():
         board = data["board"]
         token = data["token"]
     elif response == 503:
-        print(response)
         if change_server():
             return connect()
         else:
             return None, None, None
     else:
-        print(response)
         return None, None, None
 
     return player, board, token
@@ -157,7 +155,6 @@ def main():
     with open(args.config, 'r') as config_file:
         data = json.load(config_file)
         servers_ip = data["servers"]
-        print(servers_ip)
 
     ping_thread = threading.Thread(target=update_servers_status)
     ping_thread.start()
