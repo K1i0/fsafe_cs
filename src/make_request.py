@@ -5,9 +5,16 @@ import sys
 def ping(url):
     stat, response = make_request('GET', 'http://' + url + '/ping')
     if stat:
-        # print(f"Ответ от {url + '/ping'}: {response.text}")
         return True
     return False
+
+
+def ping_extend(url):
+    stat, response = make_request('GET', 'http://' + url + '/ping')
+    if stat:
+        print(f"Ответ от {url + '/ping'}: {response.text}")
+        return True, response
+    return False, ''
 
 
 def process_response(response):

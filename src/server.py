@@ -26,26 +26,99 @@ reserve_servers = {}
 is_init_finished = False
 reconnect_count = 3
 
+SERVER_ADDRESS = ''
+servers_priority = {}
+# is main server
+is_main = False
+redirect = ''
+
+def parse_json_config(path):
+    global reserve_servers
+    global servers_priority
+    global SERVER_ADDRESS
+
+    with open(path, 'r') as config_file:
+        data = json.load(config_file)
+        host = data["host"]
+        port = data["port"]
+        SERVER_ADDRESS = host + ':' + port
+        servers_url = data["reserve"]
+        servers_priority = data["priority"]
+    
+    if servers_priority[SERVER_ADDRESS] == "0":
+        is_main = True
+    
+    return host, port, servers_url
+
 
 @app.route('/ping', methods=['GET'])
 def ping():
-    return 'OK'
+    return jsonify(url=SERVER_ADDRESS, is_main=is_main)
 
 
-def init_interconnect(urls):
+# Обновление данных об основном сервере каждую секунду
+def update_main_server():
+    global redirect
+    global is_main
     global reserve_servers
-    global is_init_finished
-    for server in urls:
-        for _ in range(reconnect_count):
-            if mq.ping(server):
-                reserve_servers[server] = True
-                break
-            else:
-                reserve_servers[server] = False
-            time.sleep(1)
-    print(reserve_servers)
-    is_init_finished = True
-    return
+
+    while True:
+        find_main = False
+        print("ФЛАГ MAIN ЭТОГО СЕРВЕРА", is_main)
+        # Поиск main-сервера
+        # for _ in range(reconnect_count):
+        if not is_main:
+            for url, priority in servers_priority.items():
+                # Сами себя не пингуем
+                if url != SERVER_ADDRESS:
+                    stat, response = mq.ping_extend(url)
+                    # Если пинг прошел успешно
+                    if stat:
+                        reserve_servers[url] = True
+                        data = response.json()
+                        if data["is_main"]:
+                            print(f"Основной сервер: {url}")
+                            # Main в строю, заменять роль main-сервера не нужно
+                            redirect = url
+                            find_main = True
+                            break
+                    else:
+                        reserve_servers[url] = False
+
+            # Если среди серверов нет main-а
+            if not find_main:
+                high_priority_server = ''
+                # Проверяем - есть ли живой сервер с высшим приоритетом на замену
+                for priority, url in servers_priority.items():
+                    if url != SERVER_ADDRESS:
+                        stat, response = mq.ping_extend(url)   
+                        # Если ранее был найден сервер с высшим приоритетом, то сравниваем с ним
+                        if high_priority_server != '':
+                            if priority < servers_priority[high_priority_server]:
+                                high_priority_server = url
+                        # Иначе сравниваем с приоритетом этого сервера
+                        elif  priority < servers_priority[SERVER_ADDRESS]:
+                            high_priority_server = priority
+                # Если более приоритетный сервер не найден, делаем этот main-ом
+                if high_priority_server == '':
+                    print("ЭТОТ СЕРВЕР ЯВЛЯЕТСЯ ОСНОВНЫМ")
+                    is_main = True
+                else:
+                    print(f"СЕРВЕР С АДРЕСОМ {high_priority_server} СЧИТАЕТСЯ ПРИОРИТЕТНЕЕ")
+                    redirect = high_priority_server
+            print(reserve_servers)
+        else:
+            # Пингуем резервные серваки для рассылки
+            for url, priority in servers_priority.items():
+                # Сами себя не пингуем
+                if url != SERVER_ADDRESS:
+                    stat, response = mq.ping_extend(url)
+                    # Если пинг прошел успешно
+                    if stat:
+                        reserve_servers[url] = True
+                    else:
+                        reserve_servers[url] = False
+        time.sleep(1)
 
 
 @app.route("/sync", methods=['POST'])
@@ -111,6 +184,10 @@ def status():
 def join():
     global players
     global is_game_start
+
+    # Игнорирование запроса клиента на подключение, если сервер не является основным
+    if not is_main:
+        return jsonify({"error": "Ошибка подключения. Сервер не является основным"}), 400
 
     if not request.is_json:
         return jsonify({"error": "Data must be sent as JSON"}), 400
@@ -223,7 +300,6 @@ def init_game():
 
 
 def main():
-    global reserve_servers
     # Создаем парсер аргументов
     parser = argparse.ArgumentParser(description="Command line arguments parser")
     # Добавляем аргументы
@@ -231,19 +307,12 @@ def main():
                         help='Server config file')
     # Разбираем аргументы командной строки
     args = parser.parse_args()
-    with open(args.config, 'r') as config_file:
-        data = json.load(config_file)
-        host = data["host"]
-        port = data["port"]
-        servers_url = data["reserve"]
+    host, port, servers_url = parse_json_config(args.config)
 
-    # init_interconnect(servers_url)
-
-    ping_thread = threading.Thread(target=init_interconnect, args=(servers_url,))
-    ping_thread.start()
+    redirect_thread = threading.Thread(target=update_main_server)
+    redirect_thread.start()
 
     app.run(host=host, port=port, debug=True)
-    # init_interconnect(servers)
 
 
 if __name__ == '__main__':

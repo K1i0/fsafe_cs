@@ -7,7 +7,7 @@ import threading
 
 import make_request as mq
 
-SERVER_IP = '127.0.0.1:8080'
+SERVER_IP = '127.0.0.1:8081'
 SERVER_URL = 'http://' + SERVER_IP + '/'
 user_id = str(uuid.uuid4())
 
