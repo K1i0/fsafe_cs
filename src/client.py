@@ -7,8 +7,8 @@ import threading
 
 import make_request as mq
 
-SERVER_IP = '127.0.0.1:8080'
-SERVER_URL = 'http://' + SERVER_IP + '/'
+SERVER_IP = ''
+SERVER_URL = ''
 user_id = str(uuid.uuid4())
 
 servers_ip = []
@@ -21,16 +21,12 @@ def update_servers_status():
     # Обновление статусов (up / down) серверов
     while True:
         for server in servers_ip:
-            if mq.ping(server):
-                servers_stat[server] = True
-            else:
-                servers_stat[server] = False
+            servers_stat[server] = mq.ping(server)
         time.sleep(5)
 
 
 def change_server():
-    global SERVER_IP
-    global SERVER_URL
+    global SERVER_IP, SERVER_URL
 
     # Если сервак нужно сменить, значит он еще оффлайн
     servers_stat[SERVER_IP] = False
@@ -57,20 +53,24 @@ def print_board(board):
 def connect():
     status, response = mq.make_request('POST', SERVER_URL + "join", data={"uid": user_id})
 
+    if response.json().get("code"):
+        print(response.json()["code"])
+        if change_server():
+            return connect()
+        else:
+            sys.exit()
+
     if status:
         data = response.json()
-        player = data["player"]
-        board = data["board"]
-        token = data["token"]
+        return data["player"], data["board"], data["token"]
+    
     elif response == 503:
         if change_server():
             return connect()
         else:
-            return None, None, None
+            sys.exit()
     else:
         sys.exit()
-
-    return player, board, token
 
 
 def make_move():
@@ -144,14 +144,20 @@ k = 0
 
 
 def main():
-    print("Welcome to Tic Tac Toe!")
-
+    global SERVER_IP
+    global SERVER_URL
     global servers_ip
 
     parser = argparse.ArgumentParser(description="Command line arguments parser")
     parser.add_argument('--config', type=str, default='config/cc.json',
                         help='Client config file (contains server\'s ip)')
+    parser.add_argument('--server', type=str, default='127.0.0.1:8080',
+                        help='Default server\'s address to connect')
     args = parser.parse_args()
+    
+    SERVER_IP = args.server
+    SERVER_URL = 'http://' + SERVER_IP + '/'
+
     with open(args.config, 'r') as config_file:
         data = json.load(config_file)
         servers_ip = data["servers"]

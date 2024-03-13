@@ -45,9 +45,6 @@ def parse_json_config(path):
         servers_url = data["reserve"]
         servers_priority = data["priority"]
     
-    if servers_priority[SERVER_ADDRESS] == "0":
-        is_main = True
-    
     return host, port, servers_url
 
 
@@ -76,7 +73,7 @@ def update_main_server():
                     if stat:
                         reserve_servers[url] = True
                         data = response.json()
-                        if data["is_main"]:
+                        if data.get("is_main", False):
                             print(f"Основной сервер: {url}")
                             # Main в строю, заменять роль main-сервера не нужно
                             redirect = url
@@ -93,9 +90,8 @@ def update_main_server():
                     if url != SERVER_ADDRESS:
                         stat, response = mq.ping_extend(url)   
                         # Если ранее был найден сервер с высшим приоритетом, то сравниваем с ним
-                        if high_priority_server != '':
-                            if priority < servers_priority[high_priority_server]:
-                                high_priority_server = url
+                        if high_priority_server != '' and priority < servers_priority[high_priority_server]:
+                            high_priority_server = url
                         # Иначе сравниваем с приоритетом этого сервера
                         elif  priority < servers_priority[SERVER_ADDRESS]:
                             high_priority_server = priority
@@ -113,11 +109,7 @@ def update_main_server():
                 # Сами себя не пингуем
                 if url != SERVER_ADDRESS:
                     stat, response = mq.ping_extend(url)
-                    # Если пинг прошел успешно
-                    if stat:
-                        reserve_servers[url] = True
-                    else:
-                        reserve_servers[url] = False
+                    reserve_servers[url] = stat
         time.sleep(1)
 
 
@@ -187,7 +179,7 @@ def join():
 
     # Игнорирование запроса клиента на подключение, если сервер не является основным
     if not is_main:
-        return jsonify({"error": "Ошибка подключения. Сервер не является основным"}), 400
+        return jsonify(error="Connection error. Not main server",code=503), 400
 
     if not request.is_json:
         return jsonify({"error": "Data must be sent as JSON"}), 400
