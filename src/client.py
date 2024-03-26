@@ -22,7 +22,7 @@ def update_servers_status():
     while True:
         for server in servers_ip:
             servers_stat[server] = mq.ping(server)
-        time.sleep(5)
+        time.sleep(1)
 
 
 def change_server():
@@ -53,22 +53,22 @@ def print_board(board):
 def connect():
     status, response = mq.make_request('POST', SERVER_URL + "join", data={"uid": user_id})
 
-    if response.json().get("code"):
-        print(response.json()["code"])
+    if response == 503:
         if change_server():
             return connect()
         else:
             sys.exit()
+    
+    if response.json().get("code"):
+            print(response.json()["code"])
+            if change_server():
+                return connect()
+            else:
+                sys.exit()
 
     if status:
         data = response.json()
         return data["player"], data["board"], data["token"]
-    
-    elif response == 503:
-        if change_server():
-            return connect()
-        else:
-            sys.exit()
     else:
         sys.exit()
 
@@ -118,22 +118,26 @@ def wait_server(stage, token=None):
                     sys.exit()
                 status, response = mq.make_request('GET', SERVER_URL + "move")
 
-            data = response.json()
-            board = data["board"]
-            player = response.json()["player"]
-            if player == token:
-                print()
-                return token, board
-            if data["winner"]:
-                print_board(board)
-                print("Opponent wins!")
-                # break
-                sys.exit()
-            elif data["draw"]:
-                print_board(board)
-                print("It's a draw!")
-                # break
-                sys.exit()
+            try:
+                data = response.json()
+                board = data["board"]
+                player = response.json()["player"]
+                if player == token:
+                    print()
+                    return token, board
+                if data["winner"]:
+                    print_board(board)
+                    print("Opponent wins!")
+                    # break
+                    sys.exit()
+                elif data["draw"]:
+                    print_board(board)
+                    print("It's a draw!")
+                    # break
+                    sys.exit()
+            except:
+                continue
+            
             animated_loading('Waiting for opponent\'s move...')
             time.sleep(.5)
     else:
@@ -164,6 +168,7 @@ def main():
 
     ping_thread = threading.Thread(target=update_servers_status)
     ping_thread.start()
+    time.sleep(1)
 
     player, board, token = connect()
     if any(var is None for var in (player, board, token)):
